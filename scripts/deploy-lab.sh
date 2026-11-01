@@ -8,7 +8,7 @@ export WEB_IMAGE="us.icr.io/$REGISTRY_NAMESPACE/dealership:latest"
 export API_IMAGE="us.icr.io/$REGISTRY_NAMESPACE/bestcars-api:latest"
 export SENTIMENT_IMAGE="us.icr.io/$REGISTRY_NAMESPACE/bestcars-sentiment:latest"
 export APP_HOST
-docker build -t "$WEB_IMAGE" server
+docker build -f server/Dockerfile.lab -t "$WEB_IMAGE" server
 docker build -t "$API_IMAGE" server/database
 docker build -t "$SENTIMENT_IMAGE" server/djangoapp/microservices
 docker push "$WEB_IMAGE"
