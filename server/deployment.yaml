@@ -19,7 +19,7 @@ spec:
           env:
             - {name: BACKEND_URL, value: "http://localhost:3030"}
             - {name: SENTIMENT_URL, value: "http://localhost:5000"}
-            - {name: ALLOWED_HOSTS, value: "${APP_HOST}"}
+            - {name: ALLOWED_HOSTS, value: "${APP_HOST},localhost,127.0.0.1"}
             - {name: CSRF_TRUSTED_ORIGINS, value: "https://${APP_HOST}"}
             - name: DJANGO_SECRET_KEY
               valueFrom:
