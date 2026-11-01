@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dealership
+  labels: {app: dealership}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: dealership}
+  template:
+    metadata:
+      labels: {app: dealership}
+    spec:
+      containers:
+        - name: django
+          image: ${WEB_IMAGE}
+          imagePullPolicy: Always
+          ports: [{containerPort: 8000}]
+          env:
+            - {name: BACKEND_URL, value: "http://localhost:3030"}
+            - {name: SENTIMENT_URL, value: "http://localhost:5000"}
+            - {name: ALLOWED_HOSTS, value: "${APP_HOST}"}
+            - {name: CSRF_TRUSTED_ORIGINS, value: "https://${APP_HOST}"}
+            - name: DJANGO_SECRET_KEY
+              valueFrom:
+                secretKeyRef: {name: bestcars-secrets, key: django-secret}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          readinessProbe:
+            tcpSocket: {port: 8000}
+            initialDelaySeconds: 15
+        - name: api
+          image: ${API_IMAGE}
+          env:
+            - {name: MONGODB_URL, value: "mongodb://localhost:27017/dealershipsDB"}
+          command: [sh, -c]
+          args: ["until node -e \"require('net').connect(27017,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))\"; do sleep 2; done; node app.js"]
+          ports: [{containerPort: 3030}]
+          resources:
+            requests: {cpu: 30m, memory: 64Mi}
+            limits: {cpu: 200m, memory: 192Mi}
+        - name: sentiment
+          image: ${SENTIMENT_IMAGE}
+          ports: [{containerPort: 5000}]
+          resources:
+            requests: {cpu: 30m, memory: 96Mi}
+            limits: {cpu: 300m, memory: 256Mi}
+        - name: mongo
+          image: mongo:7
+          args: ["--dbpath", "/tmp/mongodb", "--bind_ip_all"]
+          ports: [{containerPort: 27017}]
+          volumeMounts: [{name: mongo-data, mountPath: /tmp/mongodb}]
+          resources:
+            requests: {cpu: 30m, memory: 128Mi}
+            limits: {cpu: 300m, memory: 384Mi}
+      volumes:
+        - name: mongo-data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dealership
+spec:
+  selector: {app: dealership}
+  ports:
+    - {name: web, port: 8000, targetPort: 8000}

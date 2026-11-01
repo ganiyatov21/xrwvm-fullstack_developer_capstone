@@ -4,7 +4,7 @@ from nltk.sentiment import SentimentIntensityAnalyzer
 
 app = Flask(__name__)
 lexicon = Path(__file__).parent / 'sentiment' / 'vader_lexicon.zip'
-sia = SentimentIntensityAnalyzer(lexicon_file=f'{lexicon.as_posix()}/vader_lexicon/vader_lexicon.txt')
+sia = SentimentIntensityAnalyzer(lexicon_file=f'{lexicon.resolve().as_uri()}/vader_lexicon/vader_lexicon.txt')
 
 @app.get('/')
 def home():
