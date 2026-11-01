@@ -129,6 +129,7 @@ dmypy.json
 .pyre/
 
 node_modules/
+vendor_modules/
 server/static/
 *.zip
 !server/djangoapp/microservices/sentiment/vader_lexicon.zip
