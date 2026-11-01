@@ -1,0 +1,69 @@
+name: Best Cars CI-CD
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    name: Test Django, React, Express-Mongo and sentiment
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1}).ok'"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Python dependencies
+        run: pip install -r server/requirements.txt -r server/djangoapp/microservices/requirements.txt
+      - name: Build React frontend
+        working-directory: server/frontend
+        run: npm ci --no-audit --no-fund && npm run build
+      - name: Django tests and migration check
+        run: |
+          python server/manage.py check
+          python server/manage.py makemigrations --check --dry-run
+          python server/manage.py test djangoapp
+      - name: Express-Mongo integration tests
+        working-directory: server/database
+        run: |
+          npm ci --no-audit --no-fund
+          node app.js > /tmp/express.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://localhost:3030/health && break || sleep 2; done
+          node smoke-test.js
+      - name: Sentiment classification tests
+        working-directory: server/djangoapp/microservices
+        run: |
+          python -c "from app import app; c=app.test_client(); assert c.get('/analyze/I love this amazing car!').json['sentiment']=='positive'; assert c.get('/analyze/Terrible service, I hate this place.').json['sentiment']=='negative'; assert c.get('/analyze/The car is blue.').json['sentiment']=='neutral'"
+  container-deployment:
+    name: Build and verify container deployment
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy all services to containers
+        run: |
+          echo "DJANGO_SECRET_KEY=$(openssl rand -hex 32)" > .env
+          docker compose up -d --build
+          for i in $(seq 1 90); do curl -fsS http://localhost:8000/djangoapp/get_dealers && break || sleep 3; done
+          curl -fsS http://localhost:8000/ | grep -q '<!doctype html>\|<!DOCTYPE html>'
+          curl -fsS http://localhost:8000/djangoapp/get_cars | grep -q Toyota
+          curl -fsS http://localhost:3030/fetchDealers/Kansas | grep -q Kansas
+          curl -fsS 'http://localhost:5000/analyze/Excellent%20service' | grep -q positive
+      - name: Container logs
+        if: always()
+        run: docker compose logs --no-color
+      - name: Stop deployment
+        if: always()
+        run: docker compose down

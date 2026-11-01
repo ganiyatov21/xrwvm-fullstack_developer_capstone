@@ -1,0 +1,8 @@
+frontend/node_modules
+frontend/build
+static
+*.sqlite3
+__pycache__
+**/__pycache__
+.env
+djangoenv

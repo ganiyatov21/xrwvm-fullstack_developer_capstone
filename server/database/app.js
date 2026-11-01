@@ -1,104 +1,47 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const cors = require('cors');
+const path = require('path');
 const fs = require('fs');
-const  cors = require('cors')
-const app = express()
-const port = 3030;
-
-app.use(cors())
-app.use(require('body-parser').urlencoded({ extended: false }));
-
-const reviews_data = JSON.parse(fs.readFileSync("reviews.json", 'utf8'));
-const dealerships_data = JSON.parse(fs.readFileSync("dealerships.json", 'utf8'));
-
-mongoose.connect("mongodb://mongo_db:27017/",{'dbName':'dealershipsDB'});
-
-
 const Reviews = require('./review');
-
 const Dealerships = require('./dealership');
-
-try {
-  Reviews.deleteMany({}).then(()=>{
-    Reviews.insertMany(reviews_data['reviews']);
-  });
-  Dealerships.deleteMany({}).then(()=>{
-    Dealerships.insertMany(dealerships_data['dealerships']);
-  });
-  
-} catch (error) {
-  res.status(500).json({ error: 'Error fetching documents' });
+const app = express();
+app.use(cors());
+app.use(express.json({limit: '32kb'}));
+app.set('json spaces', 2);
+const route = handler => (req, res, next) => Promise.resolve(handler(req, res)).catch(next);
+const numericId = value => { const id = Number(value); if (!Number.isSafeInteger(id) || id < 1) { const e = new Error('Invalid dealer id'); e.status = 400; throw e; } return id; };
+app.get('/', (req, res) => res.json({service: 'Best Cars Express-Mongo API', status: 'ok'}));
+app.get('/health', route(async (req, res) => res.status(mongoose.connection.readyState === 1 ? 200 : 503).json({database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'})));
+app.get('/fetchReviews', route(async (req, res) => res.json(await Reviews.find().select('-_id -__v').sort({id: 1}))));
+app.get('/fetchReviews/dealer/:id', route(async (req, res) => res.json(await Reviews.find({dealership: numericId(req.params.id)}).select('-_id -__v').sort({id: -1}))));
+app.get('/fetchDealers', route(async (req, res) => res.json(await Dealerships.find().select('-_id -__v').sort({id: 1}))));
+app.get('/fetchDealers/:state', route(async (req, res) => res.json(await Dealerships.find(req.params.state === 'All' ? {} : {state: req.params.state}).select('-_id -__v').sort({id: 1}))));
+app.get('/fetchDealer/:id', route(async (req, res) => res.json(await Dealerships.find({id: numericId(req.params.id)}).select('-_id -__v'))));
+const counterSchema = new mongoose.Schema({_id: String, sequence: Number});
+const Counter = mongoose.model('counters', counterSchema);
+app.post('/insert_review', route(async (req, res) => {
+  const data = req.body;
+  const dealerId = numericId(data.dealership);
+  if (!await Dealerships.exists({id: dealerId})) return res.status(404).json({error: 'Dealer not found'});
+  const counter = await Counter.findOneAndUpdate({_id: 'reviews'}, {$inc: {sequence: 1}}, {new: true});
+  const review = new Reviews({id: counter.sequence, name: data.name, dealership: dealerId, review: data.review, purchase: data.purchase, purchase_date: data.purchase_date, car_make: data.car_make, car_model: data.car_model, car_year: data.car_year});
+  await review.save();
+  const output = review.toObject(); delete output._id; delete output.__v;
+  res.status(201).json(output);
+}));
+app.use((error, req, res, next) => {
+  const status = error.status || (error.name === 'ValidationError' || error instanceof SyntaxError ? 400 : 500);
+  res.status(status).json({error: status < 500 ? error.message : 'Database request failed'});
+});
+async function start() {
+  await mongoose.connect(process.env.MONGODB_URL || 'mongodb://127.0.0.1:27017/dealershipsDB', {serverSelectionTimeoutMS: 15000});
+  const read = file => JSON.parse(fs.readFileSync(path.join(__dirname, 'data', file), 'utf8'));
+  if (!await Dealerships.exists({})) await Dealerships.insertMany(read('dealerships.json').dealerships);
+  if (!await Reviews.exists({})) await Reviews.insertMany(read('reviews.json').reviews);
+  const last = await Reviews.findOne().sort({id: -1});
+  await Counter.updateOne({_id: 'reviews'}, {$max: {sequence: last ? last.id : 0}}, {upsert: true});
+  return app.listen(Number(process.env.PORT || 3030), '0.0.0.0', () => console.log('Express-Mongo API ready on port ' + (process.env.PORT || 3030)));
 }
-
-
-// Express route to home
-app.get('/', async (req, res) => {
-    res.send("Welcome to the Mongoose API")
-});
-
-// Express route to fetch all reviews
-app.get('/fetchReviews', async (req, res) => {
-  try {
-    const documents = await Reviews.find();
-    res.json(documents);
-  } catch (error) {
-    res.status(500).json({ error: 'Error fetching documents' });
-  }
-});
-
-// Express route to fetch reviews by a particular dealer
-app.get('/fetchReviews/dealer/:id', async (req, res) => {
-  try {
-    const documents = await Reviews.find({dealership: req.params.id});
-    res.json(documents);
-  } catch (error) {
-    res.status(500).json({ error: 'Error fetching documents' });
-  }
-});
-
-// Express route to fetch all dealerships
-app.get('/fetchDealers', async (req, res) => {
-//Write your code here
-});
-
-// Express route to fetch Dealers by a particular state
-app.get('/fetchDealers/:state', async (req, res) => {
-//Write your code here
-});
-
-// Express route to fetch dealer by a particular id
-app.get('/fetchDealer/:id', async (req, res) => {
-//Write your code here
-});
-
-//Express route to insert review
-app.post('/insert_review', express.raw({ type: '*/*' }), async (req, res) => {
-  data = JSON.parse(req.body);
-  const documents = await Reviews.find().sort( { id: -1 } )
-  let new_id = documents[0]['id']+1
-
-  const review = new Reviews({
-		"id": new_id,
-		"name": data['name'],
-		"dealership": data['dealership'],
-		"review": data['review'],
-		"purchase": data['purchase'],
-		"purchase_date": data['purchase_date'],
-		"car_make": data['car_make'],
-		"car_model": data['car_model'],
-		"car_year": data['car_year'],
-	});
-
-  try {
-    const savedReview = await review.save();
-    res.json(savedReview);
-  } catch (error) {
-		console.log(error);
-    res.status(500).json({ error: 'Error inserting review' });
-  }
-});
-
-// Start the Express server
-app.listen(port, () => {
-  console.log(`Server is running on http://localhost:${port}`);
-});
+if (require.main === module) start().catch(error => { console.error(error.message); process.exit(1); });
+module.exports = {app, start};
